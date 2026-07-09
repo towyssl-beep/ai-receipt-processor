@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+출력/
+입력/
+기준/영수증/
+기준/승인내역/
+config.json
+환율.json
