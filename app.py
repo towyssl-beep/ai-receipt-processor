@@ -48,8 +48,81 @@ with c2:
 st.markdown("---")
 
 
-# ── 실행 버튼 ────────────────────────────────────────────────
-run = st.button("실행", disabled=not (receipts and approvals))
+# ── 버튼 ────────────────────────────────────────────────────
+b1, b2 = st.columns(2)
+check = b1.button("영수증 누락 확인", disabled=not (receipts and approvals))
+run   = b2.button("실행",           disabled=not (receipts and approvals))
+
+
+def _parse_inputs(receipts, approvals, rec_dir, apr_dir):
+    for f in receipts:
+        open(os.path.join(rec_dir, f.name), "wb").write(f.getvalue())
+    for f in approvals:
+        open(os.path.join(apr_dir, f.name), "wb").write(f.getvalue())
+
+    from parse_receipt import parse_folder
+    from parse_approval import parse_pdf as parse_overseas
+    from parse_domestic import parse_pdf as parse_domestic_fn
+    from parse_master import load_master
+    from match import match_all
+
+    rec_list = parse_folder(rec_dir)
+    overseas, domestic = [], []
+    for fp in sorted(glob.glob(os.path.join(apr_dir, "*.pdf"))):
+        if "(1)" in os.path.basename(fp):
+            domestic += parse_domestic_fn(fp)
+        else:
+            overseas += parse_overseas(fp)
+
+    master_path = os.path.join(ROOT, "기준", "2026 AI.xlsx")
+    master = load_master(master_path)
+    res = match_all(rec_list, overseas, domestic, master)
+    return rec_list, overseas, domestic, master, res
+
+
+def _missing_rows(unmatched_approvals):
+    rows = []
+    for a in unmatched_approvals:
+        date     = a.get("tx_date", "?")
+        merchant = a.get("merchant_key") or "?"
+        if a.get("currency") == "KRW":
+            amt = f"{a.get('krw', 0):,}원  (국내)"
+        else:
+            usd = a.get("usd_billed", "?")
+            amt = f"${usd}  ({a.get('krw', 0):,}원)  (해외)"
+        rows.append(f"{date}  |  {merchant}  |  {amt}")
+    return rows
+
+
+# ── 영수증 누락 확인 ─────────────────────────────────────────
+if check:
+    from parse_receipt import parse_folder
+    from parse_approval import parse_pdf as parse_overseas
+    from parse_domestic import parse_pdf as parse_domestic_fn
+    from parse_master import load_master
+    from match import match_all
+
+    with tempfile.TemporaryDirectory() as tmp:
+        rec_dir = os.path.join(tmp, "영수증");  os.makedirs(rec_dir)
+        apr_dir = os.path.join(tmp, "승인내역"); os.makedirs(apr_dir)
+
+        with st.spinner("확인 중..."):
+            _, _, _, _, res = _parse_inputs(receipts, approvals, rec_dir, apr_dir)
+            no_receipt = res["unmatched_approvals"]
+            n_appr = len(res["pairs"]) + len(no_receipt)
+
+        if no_receipt:
+            st.session_state["check"] = {
+                "ok": False,
+                "rows": _missing_rows(no_receipt),
+                "n_appr": n_appr,
+                "n_missing": len(no_receipt),
+            }
+        else:
+            st.session_state["check"] = {
+                "ok": True,
+                "n_appr": n_appr,
+            }
 
 
 # ── 처리 ────────────────────────────────────────────────────
@@ -73,38 +146,19 @@ if run:
         apr_dir = os.path.join(tmp, "승인내역"); os.makedirs(apr_dir)
         out_dir = os.path.join(tmp, "출력");     os.makedirs(out_dir)
 
-        for f in receipts:
-            open(os.path.join(rec_dir, f.name), "wb").write(f.getvalue())
-        for f in approvals:
-            open(os.path.join(apr_dir, f.name), "wb").write(f.getvalue())
-
         with st.spinner("처리 중..."):
-            rec_list = parse_folder(rec_dir)
+            rec_list, _, _, master, res = _parse_inputs(
+                receipts, approvals, rec_dir, apr_dir)
 
-            overseas, domestic = [], []
-            for fp in sorted(glob.glob(os.path.join(apr_dir, "*.pdf"))):
-                if "(1)" in os.path.basename(fp):
-                    domestic += parse_domestic_fn(fp)
-                else:
-                    overseas += parse_overseas(fp)
-
-            master = load_master(master_path)
-            res    = match_all(rec_list, overseas, domestic, master)
+            import build_pdf
+            import gen_gianseo_hwpx as G
+            from fx import load_override
 
             # ─ 선행 점검: 영수증 없는 승인 건 ───────────────────────────────
             no_receipt = res["unmatched_approvals"]
             if no_receipt:
-                rows = []
-                for a in no_receipt:
-                    date     = a.get("tx_date", "?")
-                    merchant = a.get("merchant_key") or "?"
-                    if a.get("currency") == "KRW":
-                        amt = f"{a.get('krw', 0):,}원  (국내)"
-                    else:
-                        usd = a.get("usd_billed", "?")
-                        amt = f"${usd}  ({a.get('krw', 0):,}원)  (해외)"
-                    rows.append(f"{date}  |  {merchant}  |  {amt}")
-                st.session_state["result"] = {"missing_approvals": rows}
+                st.session_state["result"] = {
+                    "missing_approvals": _missing_rows(no_receipt)}
             else:
                 ann   = {a["file"]: a for a in res["annotations"]}
                 order = sorted(ann, key=lambda fn: (not ann[fn]["matched"],
@@ -121,9 +175,7 @@ if run:
                 gdir     = os.path.join(out_dir, "기안서")
                 made     = G.generate(items, template_path, gdir) if items else []
 
-                # 결과물을 bytes로 메모리에 읽기 (temp dir 닫히기 전)
                 pdf_bytes = open(pdf_out, "rb").read()
-
                 zip_buf = io.BytesIO()
                 if made:
                     with zipfile.ZipFile(zip_buf, "w") as zf:
@@ -143,6 +195,18 @@ if run:
                     "n_made":     len(made),
                     "rate_str":   rate_str,
                 }
+
+
+# ── 누락 확인 결과 ──────────────────────────────────────────
+if "check" in st.session_state:
+    c = st.session_state["check"]
+    st.markdown("---")
+    if c["ok"]:
+        st.success(f"승인내역 {c['n_appr']}건 전부 영수증 있음 — 실행 버튼을 눌러 진행하세요.")
+    else:
+        st.error(f"승인내역 {c['n_appr']}건 중 {c['n_missing']}건 영수증 누락")
+        for row in c["rows"]:
+            st.markdown(f"- `{row}`")
 
 
 # ── 결과 ────────────────────────────────────────────────────
