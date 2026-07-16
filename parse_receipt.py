@@ -101,13 +101,14 @@ def parse_gmail_play(text, fname):
     email = re.search(r"내\s*계정\s*[:：]\s*(\S+@\S+)", text) or \
         re.search(r"받는사람\s*[:：]\s*(\S+@\S+)", text)
     prod = re.search(r"(Google[^\n(]*\([^\n]*\))", text)
-    # 금액: PDF "합계: ₩36,000" / OCR "합계 ¥#36,000" / OCR ₩→4 노이즈 "매월 429,000" 모두 처리
-    krw = (re.search(r"합계\s*[¥₩#\s]+([\d,]{4,})", text)
-           or re.search(r"합계\s*[:：]?\s*(?:매월)?\s*[¥₩]\s*([\d,]+)", text)
-           or re.search(r"매월\s*4?(\d{2},\d{3})", text)
+    # 금액: PDF "₩29,000" / OCR "¥#36,000" / OCR ₩→4 "429,000"(=₩29,000) 모두 처리
+    # 합계 라인에서 4? 로 ₩→4 OCR 노이즈 제거 후 XX,XXX 또는 XXX,XXX 형식 추출
+    krw = (re.search(r"합계[^\n]*?4?(\d{2,3},\d{3})\b", text)
+           or re.search(r"매월\s*4?(\d{2,3},\d{3})\b", text)
+           or re.search(r"매월\s*[¥₩]\s*([\d,]+)", text)
            or re.search(r"[¥₩]\s*([\d,]+)", text))
-    # 카드: "Visa - 1234" / "Visa •••• 1234" / OCR 노이즈(U+201C 따옴표 등) 포함 모두 처리
-    card = re.search(r"(?:Visa|VISA|Master|Amex)[^\d\n]{1,15}(\d{4})\b", text)
+    # 카드: "Visa - 1234" / "Visa •••• 1234" / OCR 노이즈 "Visa 1 1234" 등 모두 처리
+    card = re.search(r"(?:Visa|VISA|Master|Amex)[^\n]{1,20}?(\d{4})\b", text)
     # 날짜: PDF 형식 "2026. 6. 2." 또는 이미지 OCR 형식 "6월 27일"
     d = re.search(r"주문\s*날짜\s*[:：]\s*(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})", text) or \
         re.search(r"\((\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?\)", text) or \
