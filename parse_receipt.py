@@ -101,9 +101,10 @@ def parse_gmail_play(text, fname):
     email = re.search(r"내\s*계정\s*[:：]\s*(\S+@\S+)", text) or \
         re.search(r"받는사람\s*[:：]\s*(\S+@\S+)", text)
     prod = re.search(r"(Google[^\n(]*\([^\n]*\))", text)
-    # 금액: PDF "합계: ₩36,000" / 이미지 OCR "합계 ¥#36,000" 모두 처리
+    # 금액: PDF "합계: ₩36,000" / OCR "합계 ¥#36,000" / OCR ₩→4 노이즈 "매월 429,000" 모두 처리
     krw = (re.search(r"합계\s*[¥₩#\s]+([\d,]{4,})", text)
-           or re.search(r"합계\s*[:：]?\s*(?:매월?)?\s*[¥₩]\s*([\d,]+)", text)
+           or re.search(r"합계\s*[:：]?\s*(?:매월)?\s*[¥₩]\s*([\d,]+)", text)
+           or re.search(r"매월\s*4?(\d{2},\d{3})", text)
            or re.search(r"[¥₩]\s*([\d,]+)", text))
     # 카드: "Visa - 1234" / "Visa •••• 1234" / OCR 노이즈(U+201C 따옴표 등) 포함 모두 처리
     card = re.search(r"(?:Visa|VISA|Master|Amex)[^\d\n]{1,15}(\d{4})\b", text)
@@ -182,22 +183,43 @@ def _classify_and_parse(text, fname):
     return generic_extract(text, fname)
 
 
+def _ocr_text(img):
+    """PIL 이미지 → OCR 텍스트 (kor+eng 우선, 실패 시 기본값)."""
+    import pytesseract
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+    try:
+        return pytesseract.image_to_string(img, lang="kor+eng")
+    except Exception:
+        return pytesseract.image_to_string(img)
+
+
 def parse_image(path, fname):
     """PNG/JPG 이미지를 Tesseract OCR로 읽어 파싱."""
     try:
-        import pytesseract
         from PIL import Image
-        pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
         img = Image.open(path)
-        try:
-            text = pytesseract.image_to_string(img, lang="kor+eng")
-        except Exception:
-            text = pytesseract.image_to_string(img)
+        text = _ocr_text(img)
         if not text.strip():
             return {"file": fname, "error": "OCR 텍스트 없음"}
         return _classify_and_parse(text, fname)
     except Exception as e:
         return {"file": fname, "error": f"이미지 OCR 실패: {e}"}
+
+
+def _parse_pdf_with_ocr(path, fname):
+    """텍스트 없는 이미지 스캔 PDF를 OCR로 파싱."""
+    try:
+        text_parts = []
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                img = page.to_image(resolution=200).original
+                text_parts.append(_ocr_text(img))
+        text = "\n".join(text_parts)
+        if not text.strip():
+            return {"file": fname, "error": "OCR 텍스트 없음 (이미지 PDF)"}
+        return _classify_and_parse(text, fname)
+    except Exception as e:
+        return {"file": fname, "error": f"이미지 PDF OCR 실패: {e}"}
 
 
 def parse_receipt(path):
@@ -213,6 +235,8 @@ def parse_receipt(path):
         return _classify_and_parse(text, fname)
     with pdfplumber.open(path) as pdf:
         text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+    if not text.strip():
+        return _parse_pdf_with_ocr(path, fname)
     return _classify_and_parse(text, fname)
 
 

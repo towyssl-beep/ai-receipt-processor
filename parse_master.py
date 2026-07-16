@@ -53,6 +53,8 @@ def load_master(xlsx, aliases=None):
             section = 2; cur_name = ""; continue
         if a == "전직원" and (len(vals) < 2 or not vals[1]):
             section = 3; continue
+        if a == "AX프로젝트":
+            section = 4; cur_hq = ""; continue
         if a in ("본부", "이름", "사용자"):     # 헤더행
             continue
 
@@ -72,6 +74,12 @@ def load_master(xlsx, aliases=None):
             user = f"부설연구소 {cur_name}".strip()
         elif section == 3:
             user = "회사공용"
+        elif section == 4:
+            # AX프로젝트: A열=본부(forward fill), B열=사용자 이름
+            if a:
+                cur_hq = a
+            ax_name = str(vals[1]).strip() if vals[1] else ""
+            user = f"AX {ax_name}" if ax_name else f"AX {cur_hq}"
         else:
             continue
 

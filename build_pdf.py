@@ -130,12 +130,35 @@ def _overlay_after_scale(path, page_index, w, h, ann):
 
 
 
+def _img_to_pdf_bytes(path):
+    """PNG/JPG 이미지를 인메모리 PDF 바이트로 변환."""
+    from PIL import Image
+    from reportlab.pdfgen import canvas as rl_canvas
+    img = Image.open(path).convert("RGB")
+    w_px, h_px = img.size
+    w_pt = w_px * 72 / 150    # 150 DPI 기준
+    h_pt = h_px * 72 / 150
+    buf = io.BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=(w_pt, h_pt))
+    c.drawInlineImage(path, 0, 0, width=w_pt, height=h_pt)
+    c.save()
+    buf.seek(0)
+    return buf, w_pt, h_pt
+
+
 def build(receipt_paths, annotations_by_file, out_path):
     writer = PdfWriter()
     for path in receipt_paths:
         fname = os.path.basename(path)
         ann = annotations_by_file.get(fname, {"user": "(미지정)", "matched": False})
-        src = PdfReader(path)
+
+        ext = os.path.splitext(path)[1].lower()
+        if ext in (".png", ".jpg", ".jpeg"):
+            pdf_buf, _, _ = _img_to_pdf_bytes(path)
+            src = PdfReader(pdf_buf)
+        else:
+            src = PdfReader(path)
+
         page = src.pages[0]
         w = float(page.mediabox.width)
         h = float(page.mediabox.height)
