@@ -6,7 +6,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 
 st.set_page_config(page_title="AI 영수증 처리", layout="centered",
-                   initial_sidebar_state="collapsed")
+                   initial_sidebar_state="auto")
 
 st.markdown("""
 <style>
@@ -28,6 +28,33 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ── 사이드바: 기준 파일 업데이트 ────────────────────────────
+with st.sidebar:
+    st.markdown("## 기준 파일")
+    try:
+        import supabase_storage as _ss
+        files = {f["name"]: f.get("updated_at", "")[:10] for f in _ss.list_files()}
+        st.caption(f"📄 마스터 엑셀: `{files.get('2026 AI.xlsx', '없음')}`")
+        st.caption(f"📄 기안서 템플릿: `{files.get('template.hwpx', '없음')}`")
+    except Exception:
+        st.caption("Supabase 연결 확인 필요")
+
+    st.markdown("---")
+    new_master = st.file_uploader("마스터 엑셀 교체", type=["xlsx"], key="sb_master")
+    if st.button("업로드", key="btn_sb_master", disabled=not new_master):
+        with st.spinner("업로드 중..."):
+            _ss.upload("2026 AI.xlsx", new_master.getvalue())
+        st.success("마스터 엑셀 업데이트 완료")
+        st.rerun()
+
+    new_tpl = st.file_uploader("기안서 템플릿 교체", type=["hwpx"], key="sb_tpl")
+    if st.button("업로드", key="btn_sb_tpl", disabled=not new_tpl):
+        with st.spinner("업로드 중..."):
+            _ss.upload("기안서_템플릿.hwpx", new_tpl.getvalue())
+        st.success("기안서 템플릿 업데이트 완료")
+        st.rerun()
 
 
 # ── 헤더 ────────────────────────────────────────────────────
