@@ -111,6 +111,26 @@ def main():
     master_data = load_master(master)
     res = match_all(receipts, overseas, domestic, master_data)
 
+    # ─ 선행 점검: 영수증 없는 승인 건 ────────────────────────────────────────
+    no_receipt = res["unmatched_approvals"]
+    if no_receipt:
+        lines = ["=" * 60,
+                 "  [!] 아래 승인 건의 영수증이 누락되어 있습니다.",
+                 "  영수증을 입력/영수증/ 에 추가한 뒤 다시 실행하세요.",
+                 "-" * 60]
+        for a in no_receipt:
+            date     = a.get("tx_date", "?")
+            merchant = a.get("merchant_key") or "?"
+            if a.get("currency") == "KRW":
+                amt = f"{a.get('krw', 0):,}원  (국내)"
+            else:
+                usd = a.get("usd_billed", "?")
+                amt = f"${usd}  ({a.get('krw', 0):,}원)  (해외)"
+            lines.append(f"  {date}  |  {merchant}  |  {amt}")
+        lines.append("=" * 60)
+        print("\n".join(lines))
+        return
+
     # ① 60% 표기 PDF
     ann = {a["file"]: a for a in res["annotations"]}
     order = sorted(ann, key=lambda f: (not ann[f]["matched"], str(ann[f]["card_last4"]), f))

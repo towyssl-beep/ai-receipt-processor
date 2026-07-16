@@ -91,70 +91,89 @@ if run:
             master = load_master(master_path)
             res    = match_all(rec_list, overseas, domestic, master)
 
-            ann   = {a["file"]: a for a in res["annotations"]}
-            order = sorted(ann, key=lambda fn: (not ann[fn]["matched"],
-                                                str(ann[fn]["card_last4"]), fn))
-            rmap  = {os.path.basename(p): p
-                     for p in glob.glob(os.path.join(rec_dir, "*"))}
-            paths = [rmap[fn] for fn in order if fn in rmap]
+            # ─ 선행 점검: 영수증 없는 승인 건 ───────────────────────────────
+            no_receipt = res["unmatched_approvals"]
+            if no_receipt:
+                rows = []
+                for a in no_receipt:
+                    date     = a.get("tx_date", "?")
+                    merchant = a.get("merchant_key") or "?"
+                    if a.get("currency") == "KRW":
+                        amt = f"{a.get('krw', 0):,}원  (국내)"
+                    else:
+                        usd = a.get("usd_billed", "?")
+                        amt = f"${usd}  ({a.get('krw', 0):,}원)  (해외)"
+                    rows.append(f"{date}  |  {merchant}  |  {amt}")
+                st.session_state["result"] = {"missing_approvals": rows}
+            else:
+                ann   = {a["file"]: a for a in res["annotations"]}
+                order = sorted(ann, key=lambda fn: (not ann[fn]["matched"],
+                                                    str(ann[fn]["card_last4"]), fn))
+                rmap  = {os.path.basename(p): p
+                         for p in glob.glob(os.path.join(rec_dir, "*"))}
+                paths = [rmap[fn] for fn in order if fn in rmap]
 
-            pdf_out = os.path.join(out_dir, f"영수증_60퍼_표기_{period}.pdf")
-            build_pdf.build(paths, ann, pdf_out)
+                pdf_out = os.path.join(out_dir, f"영수증_60퍼_표기_{period}.pdf")
+                build_pdf.build(paths, ann, pdf_out)
 
-            override = load_override(fx_path) if os.path.exists(fx_path) else {}
-            items    = G.build_items(res, master, override=override, use_online=True)
-            gdir     = os.path.join(out_dir, "기안서")
-            made     = G.generate(items, template_path, gdir) if items else []
+                override = load_override(fx_path) if os.path.exists(fx_path) else {}
+                items    = G.build_items(res, master, override=override, use_online=True)
+                gdir     = os.path.join(out_dir, "기안서")
+                made     = G.generate(items, template_path, gdir) if items else []
 
-            # 결과물을 bytes로 메모리에 읽기 (temp dir 닫히기 전)
-            pdf_bytes = open(pdf_out, "rb").read()
+                # 결과물을 bytes로 메모리에 읽기 (temp dir 닫히기 전)
+                pdf_bytes = open(pdf_out, "rb").read()
 
-            zip_buf = io.BytesIO()
-            if made:
-                with zipfile.ZipFile(zip_buf, "w") as zf:
-                    for fpath, _ in made:
-                        zf.write(fpath, os.path.basename(fpath))
+                zip_buf = io.BytesIO()
+                if made:
+                    with zipfile.ZipFile(zip_buf, "w") as zf:
+                        for fpath, _ in made:
+                            zf.write(fpath, os.path.basename(fpath))
 
-            rate     = items[0]["rate"] if items else None
-            rate_str = f"1$ = {rate:,.0f}원" if rate else "환율 조회 실패"
+                rate     = items[0]["rate"] if items else None
+                rate_str = f"1$ = {rate:,.0f}원" if rate else "환율 조회 실패"
 
-        # session_state에 저장 (temp dir 닫힌 후에도 유지)
-        st.session_state["result"] = {
-            "pdf_bytes":  pdf_bytes,
-            "zip_bytes":  zip_buf.getvalue() if made else None,
-            "period":     period,
-            "n_rec":      len(rec_list),
-            "n_matched":  len(res["pairs"]),
-            "n_unmatched":len(res["unmatched_receipts"]),
-            "n_made":     len(made),
-            "rate_str":   rate_str,
-        }
+                st.session_state["result"] = {
+                    "pdf_bytes":  pdf_bytes,
+                    "zip_bytes":  zip_buf.getvalue() if made else None,
+                    "period":     period,
+                    "n_rec":      len(rec_list),
+                    "n_matched":  len(res["pairs"]),
+                    "n_unmatched":len(res["unmatched_receipts"]),
+                    "n_made":     len(made),
+                    "rate_str":   rate_str,
+                }
 
 
 # ── 결과 ────────────────────────────────────────────────────
 if "result" in st.session_state:
     r = st.session_state["result"]
-
-    st.markdown("---")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("매칭",   f"{r['n_matched']}건")
-    m2.metric("미매칭", f"{r['n_unmatched']}건")
-    m3.metric("기안서", f"{r['n_made']}건")
-    st.caption(f"환율  {r['rate_str']}")
-
     st.markdown("---")
 
-    st.download_button(
-        f"영수증 PDF 다운로드",
-        r["pdf_bytes"],
-        file_name=f"영수증_60퍼_표기_{r['period']}.pdf",
-        mime="application/pdf",
-    )
+    if r.get("missing_approvals"):
+        st.error("영수증 누락 — 아래 항목의 영수증을 추가한 뒤 다시 실행하세요.")
+        for row in r["missing_approvals"]:
+            st.markdown(f"- `{row}`")
+    else:
+        m1, m2, m3 = st.columns(3)
+        m1.metric("매칭",   f"{r['n_matched']}건")
+        m2.metric("미매칭", f"{r['n_unmatched']}건")
+        m3.metric("기안서", f"{r['n_made']}건")
+        st.caption(f"환율  {r['rate_str']}")
 
-    if r["zip_bytes"]:
+        st.markdown("---")
+
         st.download_button(
-            f"기안서 ZIP 다운로드  ({r['n_made']}건)",
-            r["zip_bytes"],
-            file_name=f"기안서_{r['period']}.zip",
-            mime="application/zip",
+            "영수증 PDF 다운로드",
+            r["pdf_bytes"],
+            file_name=f"영수증_60퍼_표기_{r['period']}.pdf",
+            mime="application/pdf",
         )
+
+        if r["zip_bytes"]:
+            st.download_button(
+                f"기안서 ZIP 다운로드  ({r['n_made']}건)",
+                r["zip_bytes"],
+                file_name=f"기안서_{r['period']}.zip",
+                mime="application/zip",
+            )
