@@ -84,7 +84,12 @@ def _parse_inputs(receipts, approvals, rec_dir, apr_dir, master_path):
     rec_list = parse_folder(rec_dir)
     overseas, domestic = [], []
     for fp in sorted(glob.glob(os.path.join(apr_dir, "*.pdf"))):
-        if "(1)" in os.path.basename(fp):
+        b = os.path.basename(fp)
+        if "국내" in b:
+            domestic += parse_domestic_fn(fp)
+        elif "해외" in b:
+            overseas += parse_overseas(fp)
+        elif "(1)" in b:
             domestic += parse_domestic_fn(fp)
         else:
             overseas += parse_overseas(fp)
