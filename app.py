@@ -54,7 +54,22 @@ check = b1.button("영수증 누락 확인", disabled=not (receipts and approval
 run   = b2.button("실행",           disabled=not (receipts and approvals))
 
 
-def _parse_inputs(receipts, approvals, rec_dir, apr_dir):
+def _get_base_files(tmp_dir):
+    """기준 파일 경로 반환 — Supabase 우선, 실패하면 로컬 기준/ 폴더 사용."""
+    local_master   = os.path.join(ROOT, "기준", "2026 AI.xlsx")
+    local_template = os.path.join(ROOT, "기준", "기안서_템플릿.hwpx")
+    try:
+        import supabase_storage as ss
+        master_path = os.path.join(tmp_dir, "2026 AI.xlsx")
+        open(master_path, "wb").write(ss.download("2026 AI.xlsx"))
+        template_path = os.path.join(tmp_dir, "기안서_템플릿.hwpx")
+        open(template_path, "wb").write(ss.download("기안서_템플릿.hwpx"))
+        return master_path, template_path
+    except Exception:
+        return local_master, local_template
+
+
+def _parse_inputs(receipts, approvals, rec_dir, apr_dir, master_path):
     for f in receipts:
         open(os.path.join(rec_dir, f.name), "wb").write(f.getvalue())
     for f in approvals:
@@ -74,7 +89,6 @@ def _parse_inputs(receipts, approvals, rec_dir, apr_dir):
         else:
             overseas += parse_overseas(fp)
 
-    master_path = os.path.join(ROOT, "기준", "2026 AI.xlsx")
     master = load_master(master_path)
     res = match_all(rec_list, overseas, domestic, master)
     return rec_list, overseas, domestic, master, res
@@ -107,7 +121,8 @@ if check:
         apr_dir = os.path.join(tmp, "승인내역"); os.makedirs(apr_dir)
 
         with st.spinner("확인 중..."):
-            _, _, _, _, res = _parse_inputs(receipts, approvals, rec_dir, apr_dir)
+            master_path, _ = _get_base_files(tmp)
+            _, _, _, _, res = _parse_inputs(receipts, approvals, rec_dir, apr_dir, master_path)
             no_receipt = res["unmatched_approvals"]
             n_appr = len(res["pairs"]) + len(no_receipt)
 
@@ -147,8 +162,9 @@ if run:
         out_dir = os.path.join(tmp, "출력");     os.makedirs(out_dir)
 
         with st.spinner("처리 중..."):
+            master_path, template_path = _get_base_files(tmp)
             rec_list, _, _, master, res = _parse_inputs(
-                receipts, approvals, rec_dir, apr_dir)
+                receipts, approvals, rec_dir, apr_dir, master_path)
 
             import build_pdf
             import gen_gianseo_hwpx as G
@@ -170,6 +186,7 @@ if run:
                 pdf_out = os.path.join(out_dir, f"영수증_60퍼_표기_{period}.pdf")
                 build_pdf.build(paths, ann, pdf_out)
 
+                fx_path  = os.path.join(ROOT, "환율.json")
                 override = load_override(fx_path) if os.path.exists(fx_path) else {}
                 items    = G.build_items(res, master, override=override, use_online=True)
                 gdir     = os.path.join(out_dir, "기안서")

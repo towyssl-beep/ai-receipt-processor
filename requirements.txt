@@ -3,3 +3,4 @@ openpyxl
 pypdf
 reportlab
 streamlit
+supabase

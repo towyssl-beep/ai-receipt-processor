@@ -7,3 +7,4 @@ __pycache__/
 기준/승인내역/
 config.json
 환율.json
+.streamlit/secrets.toml
