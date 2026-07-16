@@ -39,7 +39,7 @@ st.markdown("---")
 # ── 파일 업로드 ──────────────────────────────────────────────
 c1, c2 = st.columns(2)
 with c1:
-    receipts = st.file_uploader("영수증", type=["pdf", "html", "htm"],
+    receipts = st.file_uploader("영수증", type=["pdf", "html", "htm", "png", "jpg", "jpeg"],
                                 accept_multiple_files=True)
 with c2:
     approvals = st.file_uploader("승인내역", type=["pdf"],
