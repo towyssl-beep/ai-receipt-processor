@@ -29,8 +29,13 @@ def _client():
     return create_client(url, key)
 
 
+_NAME_MAP = {
+    "기안서_템플릿.hwpx": "template.hwpx",
+}
+
+
 def download(name: str) -> bytes:
-    return bytes(_client().storage.from_(BUCKET).download(name))
+    return bytes(_client().storage.from_(BUCKET).download(_NAME_MAP.get(name, name)))
 
 
 def upload(name: str, data: bytes) -> None:
