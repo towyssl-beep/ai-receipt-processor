@@ -75,8 +75,13 @@ def match_all(receipts, overseas, domestic, master=None):
     usd_receipts = [r for r in receipts if (r.get("usd") is not None)]
     krw_receipts = [r for r in receipts if (r.get("usd") is None and r.get("krw") is not None)]
 
-    op, our, oua, oref = _match_pool(usd_receipts, overseas, "usd")
-    dp, dur, dua, dref = _match_pool(krw_receipts, domestic, "krw")
+    # 해외 카드 PDF에 원화(KRW) 결제가 섞여있는 경우(ex. Google Play) 국내와 함께 처리
+    overseas_usd = [a for a in overseas if a.get("currency") != "KRW"]
+    overseas_krw = [a for a in overseas if a.get("currency") == "KRW"]
+    all_krw_approvals = domestic + overseas_krw
+
+    op, our, oua, oref = _match_pool(usd_receipts, overseas_usd, "usd")
+    dp, dur, dua, dref = _match_pool(krw_receipts, all_krw_approvals, "krw")
 
     pairs = op + dp
     # 사용자 결합 + 표기데이터 생성

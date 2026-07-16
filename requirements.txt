@@ -4,3 +4,5 @@ pypdf
 reportlab
 streamlit
 supabase
+pytesseract
+Pillow

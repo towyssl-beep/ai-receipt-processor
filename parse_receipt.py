@@ -4,7 +4,8 @@
   A) Stripe (Receipt-XXXX.pdf): OpenAI / Anthropic. USD, 카드 뒷4자리 포함.
   B) Google Cloud 명세서 PDF: 원화(₩).
   C) Gmail Google Play 영수증 PDF: 원화(₩), Google One/Gemini.
-  D) 그 외 모르는 형식: 범용 폴백 추출(금액/날짜/카드/통화/이메일).
+  D) 이미지(PNG/JPG) 스크린샷: Tesseract OCR → 범용 파싱.
+  E) 그 외 모르는 형식: 범용 폴백 추출(금액/날짜/카드/통화/이메일).
 ★ 원칙: 모르는 형식도 실패하지 말고 추출 → 승인내역과 매칭되는 것만 찾으면 됨.
 """
 import re
@@ -13,6 +14,8 @@ import json
 import glob
 import os
 import pdfplumber
+
+TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 MONTHS = {m: i for i, m in enumerate(
     ["January", "February", "March", "April", "May", "June",
@@ -81,15 +84,35 @@ def parse_gcloud(text, fname):
     }
 
 
+def _try_kor_date(text):
+    """한국어 날짜 "2026년 6월 27일" 또는 "6월 27일" 형식 파싱."""
+    m = re.search(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일", text)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    m = re.search(r"(\d{1,2})월\s*(\d{1,2})일", text)
+    if m:
+        ym = re.search(r"(202\d)", text)
+        year = ym.group(1) if ym else "2026"
+        return f"{year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    return ""
+
+
 def parse_gmail_play(text, fname):
     email = re.search(r"내\s*계정\s*[:：]\s*(\S+@\S+)", text) or \
         re.search(r"받는사람\s*[:：]\s*(\S+@\S+)", text)
     prod = re.search(r"(Google[^\n(]*\([^\n]*\))", text)
-    krw = re.search(r"합계\s*[:：]?\s*매월?\s*₩\s*([\d,]+)", text) or \
-        re.search(r"₩\s*([\d,]+)", text)
-    card = re.search(r"(?:Visa|Master|Amex)\s*[-–]\s*(\d{4})", text)
+    # 금액: PDF "합계: ₩36,000" / 이미지 OCR "합계 ¥#36,000" 모두 처리
+    krw = (re.search(r"합계\s*[¥₩#\s]+([\d,]{4,})", text)
+           or re.search(r"합계\s*[:：]?\s*(?:매월?)?\s*[¥₩]\s*([\d,]+)", text)
+           or re.search(r"[¥₩]\s*([\d,]+)", text))
+    # 카드: "Visa - 1234" / "Visa •••• 1234" / OCR 노이즈(U+201C 따옴표 등) 포함 모두 처리
+    card = re.search(r"(?:Visa|VISA|Master|Amex)[^\d\n]{1,15}(\d{4})\b", text)
+    # 날짜: PDF 형식 "2026. 6. 2." 또는 이미지 OCR 형식 "6월 27일"
     d = re.search(r"주문\s*날짜\s*[:：]\s*(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})", text) or \
-        re.search(r"\((\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?\)", text)
+        re.search(r"\((\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?\)", text) or \
+        re.search(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일", text)
+    date_paid = (f"{d.group(1)}-{int(d.group(2)):02d}-{int(d.group(3)):02d}" if d
+                 else _try_kor_date(text))
     order = re.search(r"(SOP\.[\d\-\.]+)", text)
     return {
         "type": "gmail_play",
@@ -97,7 +120,7 @@ def parse_gmail_play(text, fname):
         "vendor": "Google Play",
         "merchant_key": "GOOGLE PLAY",
         "product": (prod.group(1).strip() if prod else "Google Play"),
-        "date_paid": (f"{d.group(1)}-{int(d.group(2)):02d}-{int(d.group(3)):02d}" if d else ""),
+        "date_paid": date_paid,
         "krw": int(krw.group(1).replace(",", "")) if krw else None,
         "card_last4": card.group(1) if card else None,
         "account_email": email.group(1) if email else _account_email(text),
@@ -159,9 +182,29 @@ def _classify_and_parse(text, fname):
     return generic_extract(text, fname)
 
 
+def parse_image(path, fname):
+    """PNG/JPG 이미지를 Tesseract OCR로 읽어 파싱."""
+    try:
+        import pytesseract
+        from PIL import Image
+        pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+        img = Image.open(path)
+        try:
+            text = pytesseract.image_to_string(img, lang="kor+eng")
+        except Exception:
+            text = pytesseract.image_to_string(img)
+        if not text.strip():
+            return {"file": fname, "error": "OCR 텍스트 없음"}
+        return _classify_and_parse(text, fname)
+    except Exception as e:
+        return {"file": fname, "error": f"이미지 OCR 실패: {e}"}
+
+
 def parse_receipt(path):
     fname = os.path.basename(path)
     ext = os.path.splitext(path)[1].lower()
+    if ext in (".png", ".jpg", ".jpeg"):
+        return parse_image(path, fname)
     if ext in (".html", ".htm"):
         import html as _h
         raw = open(path, encoding="utf-8", errors="replace").read()
@@ -181,7 +224,7 @@ def _dedup_key(r):
 
 def parse_folder(folder, dedup=True):
     out = []
-    pats = ["*.pdf", "*.html", "*.htm"]
+    pats = ["*.pdf", "*.html", "*.htm", "*.png", "*.jpg", "*.jpeg"]
     files = []
     for p in pats:
         files += glob.glob(os.path.join(folder, p))
