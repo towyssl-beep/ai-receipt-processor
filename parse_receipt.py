@@ -15,7 +15,9 @@ import glob
 import os
 import pdfplumber
 
-TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+import shutil as _shutil
+TESSERACT_CMD = (_shutil.which("tesseract")
+                 or r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 
 MONTHS = {m: i for i, m in enumerate(
     ["January", "February", "March", "April", "May", "June",

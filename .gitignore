@@ -5,6 +5,9 @@ __pycache__/
 입력/
 기준/영수증/
 기준/승인내역/
+기준/*.xlsx
+기준/*.hwpx
 config.json
 환율.json
 .streamlit/secrets.toml
+NUL
