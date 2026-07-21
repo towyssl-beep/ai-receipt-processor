@@ -225,24 +225,39 @@ if run:
                 made     = G.generate(items, template_path, gdir) if items else []
 
                 pdf_bytes = open(pdf_out, "rb").read()
-                zip_buf = io.BytesIO()
+
+                # ─ 기안서 HWPX ZIP ───────────────────────────────────────────
+                hwpx_zip_buf = io.BytesIO()
                 if made:
-                    with zipfile.ZipFile(zip_buf, "w") as zf:
+                    with zipfile.ZipFile(hwpx_zip_buf, "w") as zf:
                         for fpath, _ in made:
                             zf.write(fpath, os.path.basename(fpath))
+
+                # ─ 기안서 PDF ZIP (LibreOffice 변환) ─────────────────────────
+                pdf_zip_buf = io.BytesIO()
+                if made:
+                    import hwpx_to_pdf
+                    pdf_dir = os.path.join(out_dir, "기안서_pdf")
+                    pdf_files = hwpx_to_pdf.convert_all(
+                        [fpath for fpath, _ in made], pdf_dir)
+                    if pdf_files:
+                        with zipfile.ZipFile(pdf_zip_buf, "w") as zf:
+                            for fpath in pdf_files:
+                                zf.write(fpath, os.path.basename(fpath))
 
                 rate     = items[0]["rate"] if items else None
                 rate_str = f"1$ = {rate:,.0f}원" if rate else "환율 조회 실패"
 
                 st.session_state["result"] = {
-                    "pdf_bytes":  pdf_bytes,
-                    "zip_bytes":  zip_buf.getvalue() if made else None,
-                    "period":     period,
-                    "n_rec":      len(rec_list),
-                    "n_matched":  len(res["pairs"]),
-                    "n_unmatched":len(res["unmatched_receipts"]),
-                    "n_made":     len(made),
-                    "rate_str":   rate_str,
+                    "pdf_bytes":      pdf_bytes,
+                    "zip_bytes":      hwpx_zip_buf.getvalue() if made else None,
+                    "pdf_zip_bytes":  pdf_zip_buf.getvalue() if made else None,
+                    "period":         period,
+                    "n_rec":          len(rec_list),
+                    "n_matched":      len(res["pairs"]),
+                    "n_unmatched":    len(res["unmatched_receipts"]),
+                    "n_made":         len(made),
+                    "rate_str":       rate_str,
                 }
 
 
@@ -283,10 +298,22 @@ if "result" in st.session_state:
             mime="application/pdf",
         )
 
-        if r["zip_bytes"]:
-            st.download_button(
-                f"기안서 ZIP 다운로드  ({r['n_made']}건)",
-                r["zip_bytes"],
-                file_name=f"기안서_{r['period']}.zip",
-                mime="application/zip",
-            )
+        if r.get("zip_bytes") or r.get("pdf_zip_bytes"):
+            st.markdown(f"**기안서 ({r['n_made']}건)**")
+            col1, col2 = st.columns(2)
+            if r.get("zip_bytes"):
+                col1.download_button(
+                    "한글 파일 ZIP (.hwpx)",
+                    r["zip_bytes"],
+                    file_name=f"기안서_한글_{r['period']}.zip",
+                    mime="application/zip",
+                )
+            if r.get("pdf_zip_bytes"):
+                col2.download_button(
+                    "PDF ZIP",
+                    r["pdf_zip_bytes"],
+                    file_name=f"기안서_PDF_{r['period']}.zip",
+                    mime="application/zip",
+                )
+            elif r.get("zip_bytes"):
+                col2.caption("PDF 변환 실패 (서버에 LibreOffice 필요)")
