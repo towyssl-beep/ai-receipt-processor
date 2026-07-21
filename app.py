@@ -233,13 +233,12 @@ if run:
                         for fpath, _ in made:
                             zf.write(fpath, os.path.basename(fpath))
 
-                # ─ 기안서 PDF ZIP (LibreOffice 변환) ─────────────────────────
+                # ─ 기안서 PDF ZIP (ReportLab 직접 생성) ──────────────────────
                 pdf_zip_buf = io.BytesIO()
                 if made:
-                    import hwpx_to_pdf
+                    import gen_gianseo_pdf as GP
                     pdf_dir = os.path.join(out_dir, "기안서_pdf")
-                    pdf_files = hwpx_to_pdf.convert_all(
-                        [fpath for fpath, _ in made], pdf_dir)
+                    pdf_files = GP.generate_all(made, pdf_dir)
                     if pdf_files:
                         with zipfile.ZipFile(pdf_zip_buf, "w") as zf:
                             for fpath in pdf_files:
@@ -316,4 +315,4 @@ if "result" in st.session_state:
                     mime="application/zip",
                 )
             elif r.get("zip_bytes"):
-                col2.caption("PDF 변환 실패 (서버에 LibreOffice 필요)")
+                col2.caption("PDF 생성 실패")
