@@ -87,6 +87,8 @@ def normalize_merchant(m):
         return "OPENAI"
     if "SUPABASE" in u:
         return "SUPABASE"
+    if "SOLAPI" in u:
+        return "SOLAPI"
     return u
 
 

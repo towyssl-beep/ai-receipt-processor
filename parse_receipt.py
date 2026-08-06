@@ -141,6 +141,8 @@ def generic_extract(text, fname, source="generic"):
         mk, vendor = "OPENAI", "OpenAI"
     elif "supabase" in u:
         mk, vendor = "SUPABASE", "Supabase"
+    elif "solapi" in u:
+        mk, vendor = "SOLAPI", "Solapi"
     elif "google cloud" in u or "구글클라우드" in text:
         mk, vendor = "GOOGLE CLOUD", "Google Cloud"
     elif "google play" in u or "구글플레이" in text or "google one" in u or "google ai" in u:
