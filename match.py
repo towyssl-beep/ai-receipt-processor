@@ -26,13 +26,31 @@ def _amt(r):
     return r.get("usd") if r.get("usd") is not None else r.get("krw")
 
 
-def _match_pool(receipts, approvals, amount_field, tol=DATE_TOL):
+def _account_match(receipt_user, merchant_key, approval_tx_date, billing_schedule):
+    """영수증 사용자가 billing_schedule에서 해당 서비스·날짜와 연결되면 True."""
+    if not (receipt_user and billing_schedule and approval_tx_date):
+        return False
+    try:
+        a_day = int(str(approval_tx_date).split(".")[-1])
+    except Exception:
+        return False
+    for s in billing_schedule:
+        if s["user"] == receipt_user and s["service_key"] == merchant_key:
+            bd = s.get("billing_day")
+            if bd and abs(bd - a_day) <= 5:
+                return True
+    return False
+
+
+def _match_pool(receipts, approvals, amount_field, tol=DATE_TOL, master=None):
     """amount_field: 'usd' or 'krw'. approvals: 해당 통화 승인내역."""
+    billing_schedule = (master or {}).get("billing_schedule", [])
     used = set()
     pairs, unmatched_r = [], []
     for r in receipts:
         rb = r.get(amount_field)
         rdate = _d(r.get("date_paid"))
+        receipt_user = resolve_user(master, r.get("account_email"), r.get("payee")) if master else None
         cands = []
         for i, a in enumerate(approvals):
             if i in used or a.get("is_refund"):
@@ -57,10 +75,12 @@ def _match_pool(receipts, approvals, amount_field, tol=DATE_TOL):
                 diff = abs((adate - rdate).days)
                 if diff > tol:
                     continue
-            cands.append((diff, i, a))
+            acct = _account_match(receipt_user, a["merchant_key"], a.get("tx_date"), billing_schedule)
+            # 정렬키: (계정미매칭=1순위 우선, 날짜차이)
+            cands.append((0 if acct else 1, diff, i, a))
         if cands:
-            cands.sort(key=lambda x: x[0])
-            diff, i, a = cands[0]
+            cands.sort(key=lambda x: (x[0], x[1]))
+            _, diff, i, a = cands[0]
             used.add(i)
             pairs.append({"receipt": r, "approval": a, "date_diff": diff})
         else:
@@ -80,8 +100,8 @@ def match_all(receipts, overseas, domestic, master=None):
     overseas_krw = [a for a in overseas if a.get("currency") == "KRW"]
     all_krw_approvals = domestic + overseas_krw
 
-    op, our, oua, oref = _match_pool(usd_receipts, overseas_usd, "usd")
-    dp, dur, dua, dref = _match_pool(krw_receipts, all_krw_approvals, "krw")
+    op, our, oua, oref = _match_pool(usd_receipts, overseas_usd, "usd", master=master)
+    dp, dur, dua, dref = _match_pool(krw_receipts, all_krw_approvals, "krw", master=master)
 
     pairs = op + dp
     # 사용자 결합 + 표기데이터 생성
