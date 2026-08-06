@@ -43,29 +43,32 @@ def _account_match(receipt_user, merchant_key, approval_tx_date, billing_schedul
 
 
 def _match_pool(receipts, approvals, amount_field, tol=DATE_TOL, master=None):
-    """amount_field: 'usd' or 'krw'. approvals: 해당 통화 승인내역."""
+    """amount_field: 'usd' or 'krw'. approvals: 해당 통화 승인내역.
+
+    전체 후보 쌍을 (계정일치 우선, 날짜차이) 기준으로 정렬 후 순서대로 1:1 매칭.
+    파일 처리 순서에 관계없이 날짜가 가장 가까운 쌍이 우선 매칭된다.
+    """
     billing_schedule = (master or {}).get("billing_schedule", [])
-    used = set()
-    pairs, unmatched_r = [], []
-    for r in receipts:
+
+    # 모든 (영수증, 승인) 후보 쌍 수집
+    all_cands = []
+    for ri, r in enumerate(receipts):
         rb = r.get(amount_field)
         rdate = _d(r.get("date_paid"))
         receipt_user = resolve_user(master, r.get("account_email"), r.get("payee")) if master else None
-        cands = []
-        for i, a in enumerate(approvals):
-            if i in used or a.get("is_refund"):
+        for ai, a in enumerate(approvals):
+            if a.get("is_refund"):
                 continue
             if a["merchant_key"] != r["merchant_key"]:
                 continue
             if amount_field == "usd":
                 av = a.get("usd_local")
             elif a.get("currency") == "KRW" and a.get("usd_local") is not None:
-                av = a.get("usd_local")  # 해외-KRW: 수수료 포함 전 실청구액
+                av = a.get("usd_local")
             else:
                 av = a.get("krw")
             if rb is None or av is None:
                 continue
-            # GOOGLE CLOUD: 크레딧 반영으로 영수증 금액 ≠ 승인금액인 경우가 있어 상대 오차 50% 허용
             if r.get("merchant_key") == "GOOGLE CLOUD":
                 rel = abs(av - rb) / max(av, rb) if max(av, rb) > 0 else 0
                 if rel > 0.5:
@@ -81,17 +84,22 @@ def _match_pool(receipts, approvals, amount_field, tol=DATE_TOL, master=None):
                 if diff > tol:
                     continue
             acct = _account_match(receipt_user, a["merchant_key"], a.get("tx_date"), billing_schedule)
-            # 정렬키: (계정미매칭=1순위 우선, 날짜차이)
-            cands.append((0 if acct else 1, diff, i, a))
-        if cands:
-            cands.sort(key=lambda x: (x[0], x[1]))
-            _, diff, i, a = cands[0]
-            used.add(i)
-            pairs.append({"receipt": r, "approval": a, "date_diff": diff})
-        else:
-            unmatched_r.append(r)
-    unmatched_a = [a for i, a in enumerate(approvals)
-                   if i not in used and not a.get("is_refund")]
+            all_cands.append((0 if acct else 1, diff, ri, ai))
+
+    # 날짜 차이 오름차순(계정일치 우선)으로 정렬 후 1:1 매칭
+    all_cands.sort(key=lambda x: (x[0], x[1]))
+    used_r, used_a = set(), set()
+    pairs = []
+    for acct_flag, diff, ri, ai in all_cands:
+        if ri in used_r or ai in used_a:
+            continue
+        used_r.add(ri)
+        used_a.add(ai)
+        pairs.append({"receipt": receipts[ri], "approval": approvals[ai], "date_diff": diff})
+
+    unmatched_r = [r for ri, r in enumerate(receipts) if ri not in used_r]
+    unmatched_a = [a for ai, a in enumerate(approvals)
+                   if ai not in used_a and not a.get("is_refund")]
     refunds = [a for a in approvals if a.get("is_refund")]
     return pairs, unmatched_r, unmatched_a, refunds
 
