@@ -18,7 +18,7 @@ HEADER_RE = re.compile(
 )
 # 금액줄: 현지금액 [840]USD 매출종류 미화매출 적용환율 수수료 단기 청구금액(원)
 AMOUNT_RE = re.compile(
-    r"(?P<local>-?[\d,]+(?:\.\d+)?)\s*\[\d+\]\S+\s+(?P<type>\S+)\s+"
+    r"(?P<local>-?[\d,]+(?:\.\d+)?)\s*\[\d+\](?P<curr>\S+)\s+(?P<type>\S+)\s+"
     r"(?P<usd>-?[\d,]+(?:\.\d+)?)\s+(?P<rate>-?[\d,]+(?:\.\d+)?)\s+"
     r"(?P<fee>-?[\d,]+)\s+(?P<short>-?[\d,]+)\s+(?P<krw>-?[\d,]+)\s*$"
 )
@@ -61,6 +61,8 @@ def parse_pdf(path):
         # 업종명 조각 '[5734] 컴퓨터소프트웨', '어' 제거
         merchant = re.sub(r"\[\d+\]\s*컴퓨터소프트웨?어?", "", merchant_raw)
         merchant = re.sub(r"\s+", " ", merchant).strip()
+        curr_code = amt.group("curr").upper()
+        currency = "KRW" if "KRW" in curr_code else "USD"
         records.append({
             "merchant_key": normalize_merchant(merchant),
             "card_last4": h.group("last4"),
@@ -74,6 +76,7 @@ def parse_pdf(path):
             "rate": _num(amt.group("rate")),
             "krw": int(_num(amt.group("krw"))),
             "is_refund": "취소" in amt.group("type"),
+            "currency": currency,
         })
     return records
 

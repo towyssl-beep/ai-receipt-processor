@@ -57,7 +57,12 @@ def _match_pool(receipts, approvals, amount_field, tol=DATE_TOL, master=None):
                 continue
             if a["merchant_key"] != r["merchant_key"]:
                 continue
-            av = a.get("usd_local") if amount_field == "usd" else a.get("krw")
+            if amount_field == "usd":
+                av = a.get("usd_local")
+            elif a.get("currency") == "KRW" and a.get("usd_local") is not None:
+                av = a.get("usd_local")  # 해외-KRW: 수수료 포함 전 실청구액
+            else:
+                av = a.get("krw")
             if rb is None or av is None:
                 continue
             # GOOGLE CLOUD: 크레딧 반영으로 영수증 금액 ≠ 승인금액인 경우가 있어 상대 오차 50% 허용
