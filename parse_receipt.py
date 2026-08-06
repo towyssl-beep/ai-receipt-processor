@@ -228,11 +228,20 @@ def _parse_pdf_with_ocr(path, fname):
         return {"file": fname, "error": f"이미지 PDF OCR 실패: {e}"}
 
 
+# 파일명으로 계정 이메일을 특정할 수 없을 때 수동 매핑
+_FNAME_EMAIL_OVERRIDE = {
+    "do-messenger_screenshot_2026-07-06_10_28_56.png": "jongwoo4u@gmail.com",
+}
+
+
 def parse_receipt(path):
     fname = os.path.basename(path)
     ext = os.path.splitext(path)[1].lower()
     if ext in (".png", ".jpg", ".jpeg"):
-        return parse_image(path, fname)
+        result = parse_image(path, fname)
+        if fname in _FNAME_EMAIL_OVERRIDE and not result.get("account_email"):
+            result["account_email"] = _FNAME_EMAIL_OVERRIDE[fname]
+        return result
     if ext in (".html", ".htm"):
         import html as _h
         raw = open(path, encoding="utf-8", errors="replace").read()
