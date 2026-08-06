@@ -152,9 +152,10 @@ def generic_extract(text, fname, source="generic"):
     else:
         mk, vendor = "?", "?"
     usd = re.search(r"\$\s?([\d,]+\.\d{2})", text)
-    krw = (re.search(r"[₩¥]+\s?([\d,]{3,})", text) or re.search(r"([\d,]{3,})\s*원", text)
+    krw = (re.search(r"[₩¥\\]\s*([\d,]{3,})\s*KRW", text) or   # SOLAPI: ₩가 \로 추출
+           re.search(r"[₩¥]+\s?([\d,]{3,})", text) or re.search(r"([\d,]{3,})\s*원", text)
            or (re.search(r"\b(\d{2},\d{3})\b", text) if source=="image_ocr" else None))
-    card = re.search(r"(?:Visa|Master|Amex|VISA)\s*[-–]?\s*[•*\s]*(\d{4})\b", text)
+    card = re.search(r"(?:Visa|Master|Amex|VISA|visa[Cc]ard)\s*[-–(]?\s*[•*\s]*(\d{4})\b", text)
     email = _account_email(text)
     date = ""
     for pat in [r"([A-Za-z]+ \d{1,2}, \d{4})", r"(\d{4})[.\-]\s*(\d{1,2})[.\-]\s*(\d{1,2})"]:
@@ -239,8 +240,23 @@ def parse_receipt(path):
         text = _h.unescape(re.sub(r"<[^>]+>", " ", raw))
         return _classify_and_parse(text, fname)
     with pdfplumber.open(path) as pdf:
-        text = "\n".join((p.extract_text() or "") for p in pdf.pages)
-    if not text.strip():
+        pages = pdf.pages
+        text = "\n".join((p.extract_text() or "") for p in pages)
+        # 2열 레이아웃 등으로 텍스트가 짧게 추출된 경우 단어 위치 기반 재구성
+        if len(text.strip()) < 300:
+            all_words = []
+            for p in pages:
+                all_words.extend(p.extract_words(x_tolerance=5, y_tolerance=5) or [])
+            if all_words:
+                from collections import defaultdict
+                rows = defaultdict(list)
+                for w in all_words:
+                    rows[round(w["top"] / 4)].append(w)
+                text = "\n".join(
+                    " ".join(w["text"] for w in sorted(row, key=lambda w: w["x0"]))
+                    for row in (rows[k] for k in sorted(rows))
+                )
+    if not text.strip() or len(text.strip()) < 300:
         return _parse_pdf_with_ocr(path, fname)
     return _classify_and_parse(text, fname)
 
