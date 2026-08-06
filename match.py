@@ -83,14 +83,13 @@ def _match_pool(receipts, approvals, amount_field, tol=DATE_TOL, master=None):
                 diff = abs((adate - rdate).days)
                 if diff > tol:
                     continue
-            acct = _account_match(receipt_user, a["merchant_key"], a.get("tx_date"), billing_schedule)
-            all_cands.append((0 if acct else 1, diff, ri, ai))
+            all_cands.append((diff, ri, ai))
 
     # 날짜 차이 오름차순(계정일치 우선)으로 정렬 후 1:1 매칭
-    all_cands.sort(key=lambda x: (x[0], x[1]))
+    all_cands.sort(key=lambda x: x[0])
     used_r, used_a = set(), set()
     pairs = []
-    for acct_flag, diff, ri, ai in all_cands:
+    for diff, ri, ai in all_cands:
         if ri in used_r or ai in used_a:
             continue
         used_r.add(ri)
