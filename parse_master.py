@@ -42,6 +42,7 @@ def load_master(xlsx, aliases=None):
     email_to_user = {}
     name_to_user = {}
     gianseo_targets = []    # 노랑(Claude Max) 행 정보
+    billing_schedule = []   # 서비스·결제일·금액 스케줄 (누락 계정 추정용)
 
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
         vals = [c.value for c in row]
@@ -97,6 +98,41 @@ def load_master(xlsx, aliases=None):
                 "card": str(card) if card else "",
             })
 
+        # 결제 스케줄 추출 (누락 계정 추정용)
+        billing_day_raw = vals[5] if len(vals) > 5 else None
+        amount_raw = vals[4] if len(vals) > 4 else None
+        bd_m = re.search(r"\d+", str(billing_day_raw)) if billing_day_raw is not None else None
+        billing_day = int(bd_m.group()) if bd_m else None
+        am_m = re.search(r"[\d,]+", str(amount_raw)) if amount_raw is not None else None
+        amount_approx = float(am_m.group().replace(",", "")) if am_m else None
+
+        if section == 4:
+            svc_key = "ANTHROPIC/CLAUDE"  # AX프로젝트 = 전부 Claude Max
+        else:
+            ai_s = str(ai).lower() if ai else ""
+            if "gemini" in ai_s:
+                svc_key = "GOOGLE PLAY" if (amount_approx and amount_approx > 1000) else "GOOGLE"
+            elif "claude" in ai_s:
+                svc_key = "ANTHROPIC/CLAUDE"
+            elif "gpt" in ai_s or "openai" in ai_s:
+                svc_key = "OPENAI"
+            elif "google api" in ai_s or ("google" in ai_s):
+                svc_key = "GOOGLE CLOUD"
+            elif "supabase" in ai_s:
+                svc_key = "SUPABASE"
+            elif "midjourney" in ai_s:
+                svc_key = "MIDJOURNEY"
+            else:
+                svc_key = ""
+
+        if svc_key and user:
+            billing_schedule.append({
+                "user": user,
+                "service_key": svc_key,
+                "amount_approx": amount_approx,
+                "billing_day": billing_day,
+            })
+
     merged_aliases = dict(DEFAULT_ALIASES)
     if aliases:
         merged_aliases.update(aliases)
@@ -105,6 +141,7 @@ def load_master(xlsx, aliases=None):
         "name_to_user": name_to_user,
         "aliases": merged_aliases,
         "gianseo_targets": gianseo_targets,
+        "billing_schedule": billing_schedule,
     }
 
 

@@ -126,7 +126,56 @@ def _parse_inputs(receipts, approvals, rec_dir, apr_dir, master_path):
     return rec_list, overseas, domestic, master, res
 
 
-def _missing_rows(unmatched_approvals):
+def _estimate_missing_user(approval, billing_schedule):
+    """승인 레코드에서 누락 영수증의 추정 계정을 반환."""
+    merchant = approval.get("merchant_key", "")
+    tx_date  = approval.get("tx_date", "")
+    currency = approval.get("currency", "USD")
+    krw      = approval.get("krw") or 0
+    usd      = approval.get("usd_billed")
+
+    try:
+        tx_day = int(str(tx_date).split(".")[-1])
+    except Exception:
+        tx_day = None
+
+    candidates = [s for s in (billing_schedule or []) if s["service_key"] == merchant]
+    if not candidates:
+        return "회사 공용계정"
+
+    # 금액 필터 (금액 일치 항목이 있을 때만 적용, 없으면 전체 유지)
+    compare_amt = krw if currency == "KRW" else (usd or 0)
+    if compare_amt:
+        amt_matched = []
+        for c in candidates:
+            ca = c.get("amount_approx") or 0
+            if not ca:
+                continue
+            if ca > 1000:   # 원화 금액
+                if currency == "KRW" and abs(ca - compare_amt) / max(ca, compare_amt) <= 0.1:
+                    amt_matched.append(c)
+            else:           # 달러 금액
+                if currency != "KRW" and abs(ca - compare_amt) / max(ca, compare_amt, 1) <= 0.35:
+                    amt_matched.append(c)
+        if amt_matched:
+            candidates = amt_matched
+
+    # 결제일 필터 (±5일)
+    if tx_day:
+        day_f = [c for c in candidates if c.get("billing_day") and abs(c["billing_day"] - tx_day) <= 5]
+        if day_f:
+            candidates = day_f
+
+    users = list(dict.fromkeys(c["user"] for c in candidates))
+    if len(users) == 1:
+        return users[0]
+    elif len(users) <= 3:
+        return " / ".join(users)
+    else:
+        return f"{users[0]} 외 {len(users)-1}명"
+
+
+def _missing_rows(unmatched_approvals, billing_schedule=None):
     rows = []
     for a in unmatched_approvals:
         date     = a.get("tx_date", "?")
@@ -136,7 +185,12 @@ def _missing_rows(unmatched_approvals):
         else:
             usd = a.get("usd_billed", "?")
             amt = f"${usd}  ({a.get('krw', 0):,}원)  (해외)"
-        rows.append(f"{date}  |  {merchant}  |  {amt}")
+        row = f"{date}  |  {merchant}  |  {amt}"
+        if billing_schedule is not None:
+            est = _estimate_missing_user(a, billing_schedule)
+            if est:
+                row += f"  →  추정: {est}"
+        rows.append(row)
     return rows
 
 
@@ -154,14 +208,14 @@ if check:
 
         with st.spinner("확인 중..."):
             master_path, _ = _get_base_files(tmp)
-            _, _, _, _, res = _parse_inputs(receipts, approvals, rec_dir, apr_dir, master_path)
+            _, _, _, master, res = _parse_inputs(receipts, approvals, rec_dir, apr_dir, master_path)
             no_receipt = res["unmatched_approvals"]
             n_appr = len(res["pairs"]) + len(no_receipt)
 
         if no_receipt:
             st.session_state["check"] = {
                 "ok": False,
-                "rows": _missing_rows(no_receipt),
+                "rows": _missing_rows(no_receipt, master.get("billing_schedule")),
                 "n_appr": n_appr,
                 "n_missing": len(no_receipt),
             }
@@ -206,7 +260,7 @@ if run:
             no_receipt = res["unmatched_approvals"]
             if no_receipt:
                 st.session_state["result"] = {
-                    "missing_approvals": _missing_rows(no_receipt)}
+                    "missing_approvals": _missing_rows(no_receipt, master.get("billing_schedule"))}
             else:
                 ann   = {a["file"]: a for a in res["annotations"]}
                 order = sorted(ann, key=lambda fn: (not ann[fn]["matched"],
