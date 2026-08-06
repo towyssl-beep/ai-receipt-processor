@@ -18,7 +18,7 @@ HEADER_RE = re.compile(
 )
 # 금액줄: 현지금액 [840]USD 매출종류 미화매출 적용환율 수수료 단기 청구금액(원)
 AMOUNT_RE = re.compile(
-    r"(?P<local>-?[\d,]+(?:\.\d+)?)\s*\[840\]USD\s+(?P<type>\S+)\s+"
+    r"(?P<local>-?[\d,]+(?:\.\d+)?)\s*\[\d+\]\S+\s+(?P<type>\S+)\s+"
     r"(?P<usd>-?[\d,]+(?:\.\d+)?)\s+(?P<rate>-?[\d,]+(?:\.\d+)?)\s+"
     r"(?P<fee>-?[\d,]+)\s+(?P<short>-?[\d,]+)\s+(?P<krw>-?[\d,]+)\s*$"
 )
