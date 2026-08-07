@@ -56,7 +56,9 @@ def load_master(xlsx, aliases=None):
             section = 3; continue
         if a == "AX프로젝트":
             section = 4; cur_hq = ""; continue
-        if a in ("본부", "이름", "사용자"):     # 헤더행
+        if a == "LAW":
+            section = 5; cur_name = ""; continue
+        if a in ("본부", "이름", "사용자", "사용먀"):     # 헤더행
             continue
 
         ai = vals[1] if len(vals) > 1 else None   # B 사용AI
@@ -81,6 +83,11 @@ def load_master(xlsx, aliases=None):
                 cur_hq = a
             ax_name = str(vals[1]).strip() if vals[1] else ""
             user = f"AX {ax_name}" if ax_name else f"AX {cur_hq}"
+        elif section == 5:
+            # LAW: A열=사용자명(이름 그대로 사용)
+            if a:
+                cur_name = a
+            user = cur_name
         else:
             continue
 
