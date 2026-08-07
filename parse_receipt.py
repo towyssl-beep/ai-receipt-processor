@@ -67,10 +67,21 @@ def parse_stripe(text, fname):
 
 
 def parse_gcloud(text, fname):
-    payee = re.search(r"받는사람\s*\n(\S+)", text)
-    final = re.search(r"최종 잔액\(KRW\)\s*₩([\d,]+)", text)
+    payee = (re.search(r"받는사람\s*\n(\S+)", text) or
+             re.search(r"이름\s*\n(\S+)", text))
+    final = (re.search(r"최종 잔액\(KRW\)\s*₩([\d,]+)", text) or
+             re.search(r"최종 잔액:\s*₩([\d,]+)", text))
     newwork = re.search(r"새 작업 합계\s*₩([\d,]+)", text)
+    # 콘솔 화면 형식: "월별 청구: Visa ... −₩59,296"
+    payment = re.search(r"월별 청구.*?[−\-]₩([\d,]+)", text)
     period = re.search(r"(\d{4}년 \d+월 \d+일~\d{4}년 \d+월 \d+일)", text)
+    # 결제일: 월별 청구 앞 날짜
+    date_m = re.search(r"(\d{4})년\s*(\d+)월\s*(\d+)일\s*월별 청구", text)
+    date_paid = (f"{date_m.group(1)}-{int(date_m.group(2)):02d}-{int(date_m.group(3)):02d}"
+                 if date_m else "")
+    # 실결제액: 월별청구 > 새작업합계 순으로 우선
+    krw_val = (int(payment.group(1).replace(",", "")) if payment else
+               int(newwork.group(1).replace(",", "")) if newwork else None)
     return {
         "type": "gcloud",
         "file": fname,
@@ -78,8 +89,8 @@ def parse_gcloud(text, fname):
         "merchant_key": "GOOGLE CLOUD",
         "payee": payee.group(1) if payee else "",
         "period": period.group(1) if period else "",
-        "date_paid": "",
-        "krw": int(newwork.group(1).replace(",", "")) if newwork else None,
+        "date_paid": date_paid,
+        "krw": krw_val,
         "krw_final": int(final.group(1).replace(",", "")) if final else None,
         "account_email": _account_email(text),
         "currency": "KRW",
@@ -139,7 +150,7 @@ def generic_extract(text, fname, source="generic"):
         mk, vendor = "ANTHROPIC/CLAUDE", "Anthropic"
     elif "openai" in u or "chatgpt" in u:
         mk, vendor = "OPENAI", "OpenAI"
-    elif "supabase" in u:
+    elif "supabase" in u or "realtime messages" in u or "monthly active users" in u:
         mk, vendor = "SUPABASE", "Supabase"
     elif "solapi" in u:
         mk, vendor = "SOLAPI", "Solapi"
@@ -184,7 +195,7 @@ def _classify_and_parse(text, fname):
         return parse_stripe(text, fname)
     if "Google Play" in text or "구글플레이" in text or "Google One" in text:
         return parse_gmail_play(text, fname)
-    if "Google Cloud" in text and "Statement" in text:
+    if "Google Cloud" in text and ("Statement" in text or "결제 프로필" in text or "최종 잔액" in text):
         return parse_gcloud(text, fname)
     return generic_extract(text, fname)
 
