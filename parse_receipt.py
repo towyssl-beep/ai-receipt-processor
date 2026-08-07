@@ -41,7 +41,9 @@ def _account_email(text):
 
 def parse_stripe(text, fname):
     vendor = "Anthropic" if "Anthropic" in text else ("OpenAI" if "OpenAI" in text else "?")
-    paid = re.search(r"\$([\d,]+\.\d{2})\s+paid on\s+([A-Za-z]+ \d+, \d{4})", text)
+    paid_usd = re.search(r"\$([\d,]+\.\d{2})\s+paid on\s+([A-Za-z]+ \d+, \d{4})", text)
+    paid_krw = re.search(r"₩([\d,]+)\s+paid on\s+([A-Za-z]+ \d+, \d{4})", text)
+    paid = paid_usd or paid_krw
     card = re.search(r"(?:Visa|Mastercard|Amex|Master)\s*-\s*(\d{4})", text)
     rcpt = re.search(r"Receipt number\s+([\d ]+)", text)
     inv = re.search(r"Invoice number\s+(\S+)", text)
@@ -58,7 +60,8 @@ def parse_stripe(text, fname):
         "receipt_no": rcpt.group(1).strip() if rcpt else "",
         "invoice_no": inv.group(1) if inv else "",
         "date_paid": _iso_date(paid.group(2)) if paid else "",
-        "usd": float(paid.group(1).replace(",", "")) if paid else None,
+        "usd": float(paid_usd.group(1).replace(",", "")) if paid_usd else None,
+        "krw": int(paid_krw.group(1).replace(",", "")) if (paid_krw and not paid_usd) else None,
         "card_last4": card.group(1) if card else None,
         "account_email": _account_email(text),
         "description": desc,
